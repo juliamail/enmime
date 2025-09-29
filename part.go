@@ -44,6 +44,7 @@ type Part struct {
 
 	Errors        []*Error  // Errors encountered while parsing this part.
 	Content       []byte    // Content after decoding, UTF-8 conversion if applicable.
+	ContentRaw    []byte    // Raw content before decoding. Use with care as this is user input.
 	ContentReader io.Reader // Reader interface for pulling the content for encoding.
 	Epilogue      []byte    // Epilogue contains data following the closing boundary marker.
 
@@ -446,8 +447,20 @@ func parseParts(parent *Part, reader *bufio.Reader) error {
 			p.PartID = parent.PartID + "." + strconv.Itoa(indexPartID)
 		}
 
+		// Copy the raw content into this Part and setup a buffered reader.
+		rawB := &bytes.Buffer{}
+		if _, err := io.Copy(rawB, br); err != nil {
+			if p.parser.skipMalformedParts {
+				parent.addErrorf(err.Error(), "copy boundary: %s", err.Error())
+				continue
+			}
+
+			return err
+		}
+		p.ContentRaw = rawB.Bytes()
+		bbr := bufio.NewReader(rawB)
+
 		// Look for part header.
-		bbr := bufio.NewReader(br)
 		if err = p.setupHeaders(bbr, ""); err != nil {
 			if p.parser.skipMalformedParts {
 				parent.addErrorf(ErrorMalformedChildPart, "read header: %s", err.Error())
